@@ -3,6 +3,24 @@ import puppeteer from "puppeteer-core";
 import express from "express";
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
+const app = express();
+const PORT = process.env.PORT || 3000;
+const DOMAIN = process.env.DOMAIN; // e.g. https://your-service.onrender.com
+
+app.use(bot.webhookCallback("/bot"));
+
+bot.on("text", async (ctx) => {
+  const url = ctx.message.text;
+  const loadingMsg = await ctx.reply("Fetching media, please wait...");
+  try {
+    const mediaUrl = await fetchMedia(url);
+    await ctx.telegram.deleteMessage(ctx.chat.id, loadingMsg.message_id);
+    await ctx.replyWithVideo(mediaUrl);
+  } catch {
+    await ctx.telegram.deleteMessage(ctx.chat.id, loadingMsg.message_id);
+    await ctx.reply("❌ Error: Could not retrieve media. Make sure the link is valid and fresh.");
+  }
+});
 
 async function launchBrowser() {
   return puppeteer.launch({
@@ -26,13 +44,10 @@ async function fetchMedia(url) {
     await page.goto(url, { waitUntil: "networkidle2", timeout: 30000 });
     const mediaUrl = await page.evaluate(() => {
       const video = document.querySelector("video");
-      if (video && video.src) return video.src;
-      const source = document.querySelector("video source");
-      if (source && source.src) return source.src;
-      return null;
+      return video?.src || document.querySelector("video source")?.src || null;
     });
     await browser.close();
-    if (!mediaUrl) throw new Error("Media URL not found on page");
+    if (!mediaUrl) throw new Error("Media not found");
     return mediaUrl;
   } catch (err) {
     await browser.close();
@@ -40,32 +55,15 @@ async function fetchMedia(url) {
   }
 }
 
-bot.on("text", async (ctx) => {
-  const url = ctx.message.text;
-  const loadingMsg = await ctx.reply("Fetching media, please wait...");
-  try {
-    const mediaUrl = await fetchMedia(url);
-    await ctx.telegram.deleteMessage(ctx.chat.id, loadingMsg.message_id);
-    await ctx.replyWithVideo(mediaUrl);
-  } catch (error) {
-    await ctx.telegram.deleteMessage(ctx.chat.id, loadingMsg.message_id);
-    await ctx.reply("❌ Error: Could not retrieve media. Make sure the link is valid and fresh.");
+app.get("/", (req, res) => res.send("🤖 Bot is alive"));
+
+app.listen(PORT, async () => {
+  console.log(`🌐 Server running on port ${PORT}`);
+  if (DOMAIN) {
+    const webhookUrl = `${DOMAIN}/bot`;
+    await bot.telegram.setWebhook(webhookUrl);
+    console.log(`📡 Webhook set to: ${webhookUrl}`);
+  } else {
+    console.log("⚠️ DOMAIN not set. Webhook not registered.");
   }
 });
-
-const app = express();
-app.get("/", (req, res) => {
-  res.send("🤖 Bot is alive!");
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🌐 Server running on port ${PORT}`);
-});
-
-bot.launch().then(() => {
-  console.log("🤖 Telegram bot is running");
-});
-
-process.once("SIGINT", () => bot.stop("SIGINT"));
-process.once("SIGTERM", () => bot.stop("SIGTERM"));
