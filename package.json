@@ -1,17 +1,14 @@
 {
-  "name": "telegram-instagram-bot",
+  "type": "module",  // Makes the project an ES module
+  "name": "instagram-telegram-bot",
   "version": "1.0.0",
-  "main": "index.js",
-  "type": "module",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "chrome-aws-lambda": "10.1.0",
-    "puppeteer-core": "10.1.0",
-    "telegraf": "^4.12.3"
-  },
-  "engines": {
-    "node": ">=18"
+    "puppeteer": "^22.8.2",
+    "telegraf": "^4.12.2",
+    "dotenv": "^16.0.3",
+    "axios": "^1.4.0"
   }
 }
