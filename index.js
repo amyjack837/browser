@@ -1,12 +1,9 @@
-import dotenv from 'dotenv';
-import { Telegraf } from 'telegraf';
-import puppeteer from 'puppeteer';
-import fs from 'fs';
-import path from 'path';
-import axios from 'axios';
-
-// Load environment variables from the .env file
-dotenv.config();
+require('dotenv').config();
+const { Telegraf } = require('telegraf');
+const puppeteer = require('puppeteer');
+const fs = require('fs');
+const path = require('path');
+const axios = require('axios');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
@@ -94,12 +91,13 @@ bot.on('text', async (ctx) => {
     return ctx.reply('❌ Please send a valid media link from igram.world or sf-converter.com.');
   }
 
-  const replyMessage = await ctx.reply('⏳ Fetching media, please wait...');
+  // Send the "fetching" message and store the message ID
+  const fetchingMessage = await ctx.reply('⏳ Fetching media, please wait...');
 
+  // Delete the "fetching" message after 3 seconds
   setTimeout(() => {
-    // Delete the fetching message after 3 seconds
-    ctx.telegram.deleteMessage(ctx.chat.id, replyMessage.message_id);
-  }, 3000);
+    ctx.deleteMessage(fetchingMessage.message_id);
+  }, 3000); // 3000 ms = 3 seconds
 
   try {
     let mediaUrl;
@@ -119,6 +117,7 @@ bot.on('text', async (ctx) => {
     await ctx.replyWithVideo({ source: fs.createReadStream(filepath) });
 
     fs.unlinkSync(filepath); // cleanup
+
   } catch (err) {
     console.error('❌ Error fetching media:', err.message);
     ctx.reply('⚠️ Error: Could not retrieve media. Make sure the link is valid, fresh, and contains video.');
