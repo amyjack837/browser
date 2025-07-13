@@ -5,6 +5,7 @@ import fs from 'fs';
 import path from 'path';
 import axios from 'axios';
 
+// Load environment variables from the .env file
 dotenv.config();
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
