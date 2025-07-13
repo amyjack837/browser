@@ -1,8 +1,7 @@
 {
   "name": "telegram-media-bot",
   "version": "1.0.0",
-  "description": "Telegram bot to fetch media using Puppeteer on Render",
-  "main": "index.js",
+  "type": "module",
   "scripts": {
     "start": "node index.js"
   },
