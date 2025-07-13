@@ -1,9 +1,11 @@
-require('dotenv').config();
-const { Telegraf } = require('telegraf');
-const puppeteer = require('puppeteer');
-const fs = require('fs');
-const path = require('path');
-const axios = require('axios');
+import dotenv from 'dotenv';
+import { Telegraf } from 'telegraf';
+import puppeteer from 'puppeteer';
+import fs from 'fs';
+import path from 'path';
+import axios from 'axios';
+
+dotenv.config();
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
@@ -31,12 +33,8 @@ async function getMediaUrlFromIgramLink(igramUrl) {
       'Accept-Language': 'en-US,en;q=0.9'
     });
 
-    await page.goto(igramUrl, { 
-      waitUntil: 'networkidle2',
-      timeout: 60000 // 60 seconds timeout
-    });
-
-    await page.waitForTimeout(2000); // Small delay to ensure page is fully loaded
+    await page.goto(igramUrl, { waitUntil: 'networkidle2', timeout: 0 });
+    await page.waitForTimeout(2000);
 
     const mediaUrl = await page.evaluate(() => {
       const video = document.querySelector('video');
@@ -60,7 +58,7 @@ async function getMediaUrlFromIgramLink(igramUrl) {
     return mediaUrl;
   } catch (err) {
     await browser.close();
-    throw new Error(`Puppeteer error: ${err.message}`);
+    throw err;
   }
 }
 
@@ -95,8 +93,13 @@ bot.on('text', async (ctx) => {
     return ctx.reply('❌ Please send a valid media link from igram.world or sf-converter.com.');
   }
 
-  const fetchingMessage = await ctx.reply('⏳ Fetching media, please wait...');
-  
+  const replyMessage = await ctx.reply('⏳ Fetching media, please wait...');
+
+  setTimeout(() => {
+    // Delete the fetching message after 3 seconds
+    ctx.telegram.deleteMessage(ctx.chat.id, replyMessage.message_id);
+  }, 3000);
+
   try {
     let mediaUrl;
 
@@ -115,12 +118,9 @@ bot.on('text', async (ctx) => {
     await ctx.replyWithVideo({ source: fs.createReadStream(filepath) });
 
     fs.unlinkSync(filepath); // cleanup
-
-    await ctx.deleteMessage(fetchingMessage.message_id); // Delete fetching message
   } catch (err) {
     console.error('❌ Error fetching media:', err.message);
-    await ctx.reply('⚠️ Error: Could not retrieve media. Make sure the link is valid, fresh, and contains video.');
-    await ctx.deleteMessage(fetchingMessage.message_id); // Delete fetching message on error
+    ctx.reply('⚠️ Error: Could not retrieve media. Make sure the link is valid, fresh, and contains video.');
   }
 });
 
