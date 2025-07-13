@@ -35,21 +35,18 @@ async function getMediaUrlFromIgramLink(igramUrl) {
     await page.waitForTimeout(2000);
 
     const mediaUrl = await page.evaluate(() => {
-      // Try video first
       const video = document.querySelector('video');
       if (video?.src) return video.src;
 
       const source = document.querySelector('source');
       if (source?.src) return source.src;
 
-      // Try gif animation or image
       const gif = document.querySelector('img[src$=".gif"]');
       if (gif?.src) return gif.src;
 
       const image = document.querySelector('img');
       if (image?.src) return image.src;
 
-      // Link with download attribute
       const link = document.querySelector('a[download]');
       if (link?.href) return link.href;
 
@@ -91,7 +88,7 @@ function getFileExtensionFromUrl(url) {
   try {
     const pathname = new URL(url).pathname;
     const ext = path.extname(pathname).toLowerCase();
-    return ext.split('?')[0]; // Remove any query params
+    return ext.split('?')[0]; // Remove query params
   } catch {
     return ''; // Invalid URL
   }
@@ -111,18 +108,15 @@ bot.on('text', async (ctx) => {
     return ctx.reply('❌ Please send a valid media link from igram.world or sf-converter.com.');
   }
 
-  // Send the "fetching" message and store the message ID
   const fetchingMessage = await ctx.reply('⏳ Fetching media, please wait...');
 
-  // Delete the "fetching" message after 3 seconds
   setTimeout(() => {
-    ctx.deleteMessage(fetchingMessage.message_id).catch(() => {}); // catch if already deleted
+    ctx.deleteMessage(fetchingMessage.message_id).catch(() => {});
   }, 3000);
 
   try {
     let mediaUrl;
 
-    // 👀 Direct media link: skip Puppeteer
     if (url.includes('sf-converter.com') || url.includes('media.igram.world')) {
       mediaUrl = url;
     } else {
@@ -162,7 +156,7 @@ bot.on('text', async (ctx) => {
         await ctx.reply('⚠️ Media type detected but not handled.');
       }
     } finally {
-      fs.unlinkSync(filepath); // Cleanup
+      fs.unlinkSync(filepath);
     }
 
   } catch (err) {
@@ -171,6 +165,18 @@ bot.on('text', async (ctx) => {
   }
 });
 
-// 🚀 Launch the bot
-bot.launch();
-console.log('🤖 Telegram bot is running...');
+// Graceful shutdown handlers
+process.once('SIGINT', () => {
+  console.log('SIGINT received, stopping bot...');
+  bot.stop('SIGINT').then(() => process.exit(0));
+});
+
+process.once('SIGTERM', () => {
+  console.log('SIGTERM received, stopping bot...');
+  bot.stop('SIGTERM').then(() => process.exit(0));
+});
+
+// Launch the bot
+bot.launch().then(() => {
+  console.log('🤖 Telegram bot is running...');
+});
