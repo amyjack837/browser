@@ -7,6 +7,7 @@ const axios = require('axios');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
+// 🧠 Extract video URL using Puppeteer if needed
 async function getMediaUrlFromIgramLink(igramUrl) {
   const browser = await puppeteer.launch({
     headless: true,
@@ -18,12 +19,20 @@ async function getMediaUrlFromIgramLink(igramUrl) {
       '--no-zygote',
       '--single-process',
       '--disable-gpu'
-    ],
+    ]
   });
 
   try {
     const page = await browser.newPage();
-    await page.goto(igramUrl, { waitUntil: 'networkidle2' });
+    await page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.1 Safari/537.36'
+    );
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-US,en;q=0.9'
+    });
+
+    await page.goto(igramUrl, { waitUntil: 'networkidle2', timeout: 0 });
+    await page.waitForTimeout(2000);
 
     const mediaUrl = await page.evaluate(() => {
       const video = document.querySelector('video');
@@ -32,12 +41,17 @@ async function getMediaUrlFromIgramLink(igramUrl) {
       const source = document.querySelector('source');
       if (source?.src) return source.src;
 
+      const link = document.querySelector('a[download]');
+      if (link?.href) return link.href;
+
       return null;
     });
 
     await browser.close();
 
-    if (!mediaUrl) throw new Error('Media URL not found');
+    if (!mediaUrl || !mediaUrl.startsWith('http')) {
+      throw new Error('Media URL not found.');
+    }
 
     return mediaUrl;
   } catch (err) {
@@ -46,12 +60,13 @@ async function getMediaUrlFromIgramLink(igramUrl) {
   }
 }
 
+// 📥 Download video to temp file
 async function downloadMedia(url, filename) {
   const writer = fs.createWriteStream(filename);
   const response = await axios({
     url,
     method: 'GET',
-    responseType: 'stream',
+    responseType: 'stream'
   });
 
   response.data.pipe(writer);
@@ -62,30 +77,46 @@ async function downloadMedia(url, filename) {
   });
 }
 
-bot.start((ctx) => ctx.reply('Send me an igram.world link and I will fetch the media for you.'));
+// 🤖 Bot command logic
+bot.start((ctx) => ctx.reply('Send me a media link from igram.world or sf-converter.com and I\'ll send you the video.'));
 
 bot.on('text', async (ctx) => {
   const url = ctx.message.text.trim();
 
-  if (!url.includes('igram.world/get')) {
-    return ctx.reply('Please send a valid igram.world media URL.');
+  if (
+    !url.includes('igram.world') &&
+    !url.includes('sf-converter.com') &&
+    !url.includes('media.igram.world')
+  ) {
+    return ctx.reply('❌ Please send a valid media link from igram.world or sf-converter.com.');
   }
 
-  await ctx.reply('Fetching media, please wait...');
+  await ctx.reply('⏳ Fetching media, please wait...');
 
   try {
-    const mediaUrl = await getMediaUrlFromIgramLink(url);
+    let mediaUrl;
+
+    // 👀 Direct media link: skip Puppeteer
+    if (url.includes('sf-converter.com') || url.includes('media.igram.world')) {
+      mediaUrl = url;
+    } else {
+      mediaUrl = await getMediaUrlFromIgramLink(url);
+    }
+
     const filename = `media_${Date.now()}.mp4`;
     const filepath = path.join(__dirname, filename);
 
     await downloadMedia(mediaUrl, filepath);
+
     await ctx.replyWithVideo({ source: fs.createReadStream(filepath) });
-    fs.unlinkSync(filepath);
+
+    fs.unlinkSync(filepath); // cleanup
   } catch (err) {
-    console.error(err);
-    ctx.reply('Error: Could not retrieve media. Make sure the link is valid and fresh.');
+    console.error('❌ Error fetching media:', err.message);
+    ctx.reply('⚠️ Error: Could not retrieve media. Make sure the link is valid, fresh, and contains video.');
   }
 });
 
+// 🚀 Launch the bot
 bot.launch();
-console.log('🤖 Telegram bot is running');
+console.log('🤖 Telegram bot is running...');
