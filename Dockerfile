@@ -1,6 +1,6 @@
 FROM node:18-slim
 
-# Install necessary dependencies
+# Install dependencies for Chromium
 RUN apt-get update && apt-get install -y \
   wget \
   ca-certificates \
@@ -22,16 +22,18 @@ RUN apt-get update && apt-get install -y \
   --no-install-recommends && \
   rm -rf /var/lib/apt/lists/*
 
-# Create app directory
+# App directory
 WORKDIR /app
 
-# Copy files
+# Install dependencies
 COPY package*.json ./
 RUN npm install
+
+# Copy bot source code
 COPY . .
 
-# Expose port (required even if bot doesn't use it)
+# Expose port (not required but safe)
 EXPOSE 3000
 
-# Start app
+# Start the bot
 CMD ["node", "index.js"]
