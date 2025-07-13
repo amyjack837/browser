@@ -8,7 +8,6 @@ const axios = require('axios');
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
 async function getMediaUrlFromIgramLink(igramUrl) {
-  // Puppeteer launch with flags suitable for Railway or cloud
   const browser = await puppeteer.launch({
     headless: true,
     args: [
@@ -24,29 +23,21 @@ async function getMediaUrlFromIgramLink(igramUrl) {
 
   try {
     const page = await browser.newPage();
-
-    // Go to the igram URL (the "get" link you have)
     await page.goto(igramUrl, { waitUntil: 'networkidle2' });
 
-    // Wait a bit if necessary for JS to load media URL
-    // Example: grab all video or audio tags src attributes
     const mediaUrl = await page.evaluate(() => {
-      // Look for <video> or <source> tags
       const video = document.querySelector('video');
-      if (video && video.src) return video.src;
+      if (video?.src) return video.src;
 
       const source = document.querySelector('source');
-      if (source && source.src) return source.src;
+      if (source?.src) return source.src;
 
-      // Or look for meta tags, scripts, etc — adjust as needed
       return null;
     });
 
     await browser.close();
 
-    if (!mediaUrl) {
-      throw new Error('Media URL not found on page');
-    }
+    if (!mediaUrl) throw new Error('Media URL not found');
 
     return mediaUrl;
   } catch (err) {
@@ -71,36 +62,30 @@ async function downloadMedia(url, filename) {
   });
 }
 
-bot.start((ctx) => ctx.reply('Send me your igram.world media link, and I will fetch the media for you!'));
+bot.start((ctx) => ctx.reply('Send me an igram.world link and I will fetch the media for you.'));
 
 bot.on('text', async (ctx) => {
-  const text = ctx.message.text.trim();
+  const url = ctx.message.text.trim();
 
-  if (!text.includes('igram.world/get')) {
-    return ctx.reply('Please send a valid igram.world/get URL.');
+  if (!url.includes('igram.world/get')) {
+    return ctx.reply('Please send a valid igram.world media URL.');
   }
 
-  await ctx.reply('Processing your media, please wait...');
+  await ctx.reply('Fetching media, please wait...');
 
   try {
-    const mediaUrl = await getMediaUrlFromIgramLink(text);
-
-    const filename = `downloaded_media_${Date.now()}.mp4`; // or .jpg for images if needed
+    const mediaUrl = await getMediaUrlFromIgramLink(url);
+    const filename = `media_${Date.now()}.mp4`;
     const filepath = path.join(__dirname, filename);
 
     await downloadMedia(mediaUrl, filepath);
-
-    // Send the downloaded file to Telegram chat
     await ctx.replyWithVideo({ source: fs.createReadStream(filepath) });
-
-    // Clean up local file after sending
     fs.unlinkSync(filepath);
   } catch (err) {
-    console.error('Error:', err);
-    await ctx.reply('Failed to fetch or send the media. Make sure the link is fresh and valid.');
+    console.error(err);
+    ctx.reply('Error: Could not retrieve media. Make sure the link is valid and fresh.');
   }
 });
 
 bot.launch();
-
-console.log('Telegram bot is up and running!');
+console.log('🤖 Telegram bot is running');
