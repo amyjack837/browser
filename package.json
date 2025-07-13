@@ -1,5 +1,5 @@
 {
-  "type": "module",  // Makes the project an ES module
+  "type": "module",
   "name": "instagram-telegram-bot",
   "version": "1.0.0",
   "scripts": {
