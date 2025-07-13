@@ -1,58 +1,129 @@
-import { Telegraf } from "telegraf";
-import puppeteer from "puppeteer-core";
-import chromium from "chrome-aws-lambda"; // lightweight chromium for Render/AWS env
+require('dotenv').config();
+const { Telegraf } = require('telegraf');
+const puppeteer = require('puppeteer');
+const fs = require('fs');
+const path = require('path');
+const axios = require('axios');
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-async function fetchMedia(url) {
-  let browser = null;
-  try {
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath,
-      headless: chromium.headless,
-    });
-    const page = await browser.newPage();
-    await page.goto(url, { waitUntil: "networkidle2" });
+// 🧠 Extract video URL using Puppeteer if needed
+async function getMediaUrlFromIgramLink(igramUrl) {
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--no-zygote',
+      '--single-process',
+      '--disable-gpu'
+    ]
+  });
 
-    // Dummy selector: update this based on your actual page & media extraction logic
-    const mediaUrl = await page.evaluate(() => {
-      // Example: get first video src
-      const video = document.querySelector("video");
-      return video ? video.src : null;
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.1 Safari/537.36'
+    );
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'en-US,en;q=0.9'
     });
+
+    await page.goto(igramUrl, { 
+      waitUntil: 'networkidle2',
+      timeout: 60000 // 60 seconds timeout
+    });
+
+    await page.waitForTimeout(2000); // Small delay to ensure page is fully loaded
+
+    const mediaUrl = await page.evaluate(() => {
+      const video = document.querySelector('video');
+      if (video?.src) return video.src;
+
+      const source = document.querySelector('source');
+      if (source?.src) return source.src;
+
+      const link = document.querySelector('a[download]');
+      if (link?.href) return link.href;
+
+      return null;
+    });
+
+    await browser.close();
+
+    if (!mediaUrl || !mediaUrl.startsWith('http')) {
+      throw new Error('Media URL not found.');
+    }
 
     return mediaUrl;
   } catch (err) {
-    console.error("Puppeteer fetch error:", err);
-    return null;
-  } finally {
-    if (browser) await browser.close();
+    await browser.close();
+    throw new Error(`Puppeteer error: ${err.message}`);
   }
 }
 
-bot.start((ctx) => ctx.reply("Send me an Instagram media link to fetch!"));
+// 📥 Download video to temp file
+async function downloadMedia(url, filename) {
+  const writer = fs.createWriteStream(filename);
+  const response = await axios({
+    url,
+    method: 'GET',
+    responseType: 'stream'
+  });
 
-bot.on("text", async (ctx) => {
+  response.data.pipe(writer);
+
+  return new Promise((resolve, reject) => {
+    writer.on('finish', resolve);
+    writer.on('error', reject);
+  });
+}
+
+// 🤖 Bot command logic
+bot.start((ctx) => ctx.reply('Send me a media link from igram.world or sf-converter.com and I\'ll send you the video.'));
+
+bot.on('text', async (ctx) => {
   const url = ctx.message.text.trim();
-  await ctx.reply("Fetching media, please wait...");
 
-  const mediaLink = await fetchMedia(url);
-
-  if (!mediaLink) {
-    return ctx.reply("❌ Could not retrieve media. Make sure the link is valid and fresh.");
+  if (
+    !url.includes('igram.world') &&
+    !url.includes('sf-converter.com') &&
+    !url.includes('media.igram.world')
+  ) {
+    return ctx.reply('❌ Please send a valid media link from igram.world or sf-converter.com.');
   }
 
-  // Send video or photo (adapt as needed)
-  if (mediaLink.endsWith(".mp4")) {
-    await ctx.replyWithVideo(mediaLink);
-  } else {
-    await ctx.replyWithPhoto(mediaLink);
+  const fetchingMessage = await ctx.reply('⏳ Fetching media, please wait...');
+  
+  try {
+    let mediaUrl;
+
+    // 👀 Direct media link: skip Puppeteer
+    if (url.includes('sf-converter.com') || url.includes('media.igram.world')) {
+      mediaUrl = url;
+    } else {
+      mediaUrl = await getMediaUrlFromIgramLink(url);
+    }
+
+    const filename = `media_${Date.now()}.mp4`;
+    const filepath = path.join(__dirname, filename);
+
+    await downloadMedia(mediaUrl, filepath);
+
+    await ctx.replyWithVideo({ source: fs.createReadStream(filepath) });
+
+    fs.unlinkSync(filepath); // cleanup
+
+    await ctx.deleteMessage(fetchingMessage.message_id); // Delete fetching message
+  } catch (err) {
+    console.error('❌ Error fetching media:', err.message);
+    await ctx.reply('⚠️ Error: Could not retrieve media. Make sure the link is valid, fresh, and contains video.');
+    await ctx.deleteMessage(fetchingMessage.message_id); // Delete fetching message on error
   }
 });
 
+// 🚀 Launch the bot
 bot.launch();
-
-process.once("SIGINT", () => bot.stop("SIGINT"));
-process.once("SIGTERM", () => bot.stop("SIGTERM"));
+console.log('🤖 Telegram bot is running...');
