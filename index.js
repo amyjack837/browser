@@ -1,25 +1,17 @@
 require('dotenv').config();
 const { Telegraf } = require('telegraf');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 
+// Initialize the bot with your token
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-// 🧠 Extract media URL using Puppeteer if needed
+// 🧠 Extract media URL (image or video) from the provided link
 async function getMediaUrlFromIgramLink(igramUrl) {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--no-zygote',
-      '--single-process',
-      '--disable-gpu'
-    ]
+  const browser = await puppeteer.connect({
+    browserWSEndpoint: `wss://chrome.browserless.io?token=${process.env.BROWSERLESS_TOKEN}`,
   });
 
   try {
@@ -28,34 +20,32 @@ async function getMediaUrlFromIgramLink(igramUrl) {
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.1 Safari/537.36'
     );
     await page.setExtraHTTPHeaders({
-      'Accept-Language': 'en-US,en;q=0.9'
+      'Accept-Language': 'en-US,en;q=0.9',
     });
 
     await page.goto(igramUrl, { waitUntil: 'networkidle2', timeout: 0 });
     await page.waitForTimeout(2000);
 
+    // Check for video or image links
     const mediaUrl = await page.evaluate(() => {
       const video = document.querySelector('video');
-      if (video?.src) return video.src;
-
-      const source = document.querySelector('source');
-      if (source?.src) return source.src;
-
-      const gif = document.querySelector('img[src$=".gif"]');
-      if (gif?.src) return gif.src;
+      if (video?.src) return { type: 'video', url: video.src };
 
       const image = document.querySelector('img');
-      if (image?.src) return image.src;
+      if (image?.src) return { type: 'image', url: image.src };
+
+      const source = document.querySelector('source');
+      if (source?.src) return { type: 'video', url: source.src };
 
       const link = document.querySelector('a[download]');
-      if (link?.href) return link.href;
+      if (link?.href) return { type: 'video', url: link.href };
 
       return null;
     });
 
     await browser.close();
 
-    if (!mediaUrl || !mediaUrl.startsWith('http')) {
+    if (!mediaUrl || !mediaUrl.url.startsWith('http')) {
       throw new Error('Media URL not found.');
     }
 
@@ -66,13 +56,13 @@ async function getMediaUrlFromIgramLink(igramUrl) {
   }
 }
 
-// 📥 Download media to temp file
+// 📥 Download media (image or video) to a temporary file
 async function downloadMedia(url, filename) {
   const writer = fs.createWriteStream(filename);
   const response = await axios({
     url,
     method: 'GET',
-    responseType: 'stream'
+    responseType: 'stream',
   });
 
   response.data.pipe(writer);
@@ -81,17 +71,6 @@ async function downloadMedia(url, filename) {
     writer.on('finish', resolve);
     writer.on('error', reject);
   });
-}
-
-// Helper to get file extension from URL
-function getFileExtensionFromUrl(url) {
-  try {
-    const pathname = new URL(url).pathname;
-    const ext = path.extname(pathname).toLowerCase();
-    return ext.split('?')[0]; // Remove query params
-  } catch {
-    return ''; // Invalid URL
-  }
 }
 
 // 🤖 Bot command logic
@@ -108,75 +87,38 @@ bot.on('text', async (ctx) => {
     return ctx.reply('❌ Please send a valid media link from igram.world or sf-converter.com.');
   }
 
-  const fetchingMessage = await ctx.reply('⏳ Fetching media, please wait...');
-
-  setTimeout(() => {
-    ctx.deleteMessage(fetchingMessage.message_id).catch(() => {});
-  }, 3000);
+  await ctx.reply('⏳ Fetching media, please wait...');
 
   try {
-    let mediaUrl;
+    let mediaData;
 
+    // 👀 Direct media link: skip Puppeteer
     if (url.includes('sf-converter.com') || url.includes('media.igram.world')) {
-      mediaUrl = url;
+      mediaData = { type: 'video', url: url };
     } else {
-      mediaUrl = await getMediaUrlFromIgramLink(url);
+      mediaData = await getMediaUrlFromIgramLink(url);
     }
 
-    const fileExt = getFileExtensionFromUrl(mediaUrl);
-
-    const videoExts = ['.mp4', '.mov', '.avi', '.mkv', '.webm'];
-    const imageExts = ['.jpg', '.jpeg', '.png', '.bmp', '.webp'];
-    const audioExts = ['.mp3', '.m4a', '.ogg', '.wav', '.flac', '.aac'];
-    const animationExts = ['.gif'];
-
-    const allSupported = [...videoExts, ...imageExts, ...audioExts, ...animationExts];
-
-    if (!allSupported.includes(fileExt)) {
-      return ctx.reply(`⚠️ Unsupported media type: ${fileExt || 'unknown'}`);
-    }
-
-    const filename = `media_${Date.now()}${fileExt}`;
+    const filename = `media_${Date.now()}.${mediaData.type === 'video' ? 'mp4' : 'jpg'}`;
     const filepath = path.join(__dirname, filename);
 
-    await downloadMedia(mediaUrl, filepath);
+    // Download the media file (video or image)
+    await downloadMedia(mediaData.url, filepath);
 
-    const mediaStream = { source: fs.createReadStream(filepath) };
-
-    try {
-      if (videoExts.includes(fileExt)) {
-        await ctx.replyWithVideo(mediaStream);
-      } else if (imageExts.includes(fileExt)) {
-        await ctx.replyWithPhoto(mediaStream);
-      } else if (animationExts.includes(fileExt)) {
-        await ctx.replyWithAnimation(mediaStream);
-      } else if (audioExts.includes(fileExt)) {
-        await ctx.replyWithAudio(mediaStream);
-      } else {
-        await ctx.reply('⚠️ Media type detected but not handled.');
-      }
-    } finally {
-      fs.unlinkSync(filepath);
+    // Respond with the appropriate media type
+    if (mediaData.type === 'video') {
+      await ctx.replyWithVideo({ source: fs.createReadStream(filepath) });
+    } else if (mediaData.type === 'image') {
+      await ctx.replyWithPhoto({ source: fs.createReadStream(filepath) });
     }
 
+    fs.unlinkSync(filepath); // cleanup
   } catch (err) {
     console.error('❌ Error fetching media:', err.message);
-    ctx.reply('⚠️ Error: Could not retrieve media. Make sure the link is valid, fresh, and contains supported media.');
+    ctx.reply('⚠️ Error: Could not retrieve media. Make sure the link is valid, fresh, and contains video or image.');
   }
 });
 
-// Graceful shutdown handlers
-process.once('SIGINT', () => {
-  console.log('SIGINT received, stopping bot...');
-  bot.stop('SIGINT').then(() => process.exit(0));
-});
-
-process.once('SIGTERM', () => {
-  console.log('SIGTERM received, stopping bot...');
-  bot.stop('SIGTERM').then(() => process.exit(0));
-});
-
-// Launch the bot
-bot.launch().then(() => {
-  console.log('🤖 Telegram bot is running...');
-});
+// 🚀 Launch the bot
+bot.launch();
+console.log('🤖 Telegram bot is running...');
