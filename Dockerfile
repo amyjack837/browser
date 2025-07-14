@@ -1,13 +1,13 @@
-FROM node:18-slim
+# Use an official Node.js runtime as a parent image
+FROM node:16-slim
 
-# Install dependencies for Chromium
+# Install necessary dependencies for Chromium and Puppeteer
 RUN apt-get update && apt-get install -y \
   wget \
   ca-certificates \
   fonts-liberation \
   libappindicator3-1 \
   libasound2 \
-  libatk-bridge2.0-0 \
   libatk1.0-0 \
   libcups2 \
   libdbus-1-3 \
@@ -19,21 +19,22 @@ RUN apt-get update && apt-get install -y \
   libxdamage1 \
   libxrandr2 \
   xdg-utils \
-  --no-install-recommends && \
-  rm -rf /var/lib/apt/lists/*
+  --no-install-recommends && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# App directory
+# Create and set the working directory
 WORKDIR /app
 
-# Install dependencies
+# Copy package.json and package-lock.json
 COPY package*.json ./
+
+# Install dependencies
 RUN npm install
 
-# Copy bot source code
+# Copy the rest of the application files
 COPY . .
 
-# Expose port (not required but safe)
-EXPOSE 3000
+# Expose any necessary ports (if your bot is listening on HTTP/HTTPS)
+EXPOSE 8080
 
-# Start the bot
-CMD ["node", "index.js"]
+# Start the bot when the container is run
+CMD ["npm", "start"]
